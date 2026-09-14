@@ -22,22 +22,6 @@ NUM_CLASSES   = 4
 IGNORE_INDEX  = 255
 CLASS_NAMES   = ["MES 0", "MES 1", "MES 2", "MES 3"]
 MIN_TEST_FRAMES = 5
-MASK_ENCODING = "release_indexed"
-
-
-def decode_mask(mask):
-    """Map stored mask values to training IDs 0--3 plus IGNORE_INDEX."""
-    mask = mask.astype(np.uint8, copy=True)
-    if MASK_ENCODING == "release_indexed":
-        # Release: 0=background/unannotated, 1--4=MES 0--3, 255=ignore.
-        decoded = np.full(mask.shape, IGNORE_INDEX, dtype=np.uint8)
-        for stored_value in range(1, 5):
-            decoded[mask == stored_value] = stored_value - 1
-        return decoded
-    if MASK_ENCODING == "legacy_zero_based":
-        # Historical experiment masks: 0--3=MES 0--3, 255=ignore.
-        return mask
-    raise ValueError(f"Unknown mask encoding: {MASK_ENCODING}")
 
 
 def seed_all(seed=42):
@@ -58,7 +42,17 @@ def imread_gray(path):
 
 
 def extract_video_id(stem):
+    if "__" in stem:
+        return stem.split("__", 1)[0]
     return stem.split("_mp4")[0] + "_mp4"
+
+
+def publication_to_training_mask(mask):
+    """0=background and 255=artifact become ignore; publication 1..4 become MES 0..3."""
+    out = np.full(mask.shape, IGNORE_INDEX, dtype=np.uint8)
+    for publication_value in range(1, 5):
+        out[mask == publication_value] = publication_value - 1
+    return out
 
 
 def preprocess(img, h, w):
@@ -109,10 +103,9 @@ class MESDataset(Dataset):
     def __getitem__(self, idx):
         r    = self.df.iloc[idx]
         img  = imread_color(r.img_path)
-        mask = imread_gray(r.mask_path)
+        mask = publication_to_training_mask(imread_gray(r.mask_path))
         if img is None or mask is None:
             raise RuntimeError(f"Failed reading {r.stem}")
-        mask = decode_mask(mask)
         img  = cv2.resize(img,  (self.w, self.h), interpolation=cv2.INTER_LINEAR)
         mask = cv2.resize(mask, (self.w, self.h), interpolation=cv2.INTER_NEAREST)
         ignore = (mask == IGNORE_INDEX).astype(np.uint8)
@@ -131,14 +124,13 @@ def build_manifest(img_dir, mask_dir):
         mask_path = Path(mask_dir) / (img_path.stem + ".png")
         if not mask_path.exists():
             continue
-        mask = decode_mask(np.array(Image.open(mask_path)))
-        if (mask != IGNORE_INDEX).sum() == 0:
-            continue
+        mask = publication_to_training_mask(np.array(Image.open(mask_path)))
         rows.append({
             "stem":      img_path.stem,
             "video_id":  extract_video_id(img_path.stem),
             "img_path":  str(img_path),
             "mask_path": str(mask_path),
+            "has_scorable": bool((mask != IGNORE_INDEX).any()),
         })
         for c in range(NUM_CLASSES):
             rows[-1][f"px_{c}"] = int((mask == c).sum())
@@ -310,7 +302,7 @@ def run_lovo(args, device):
 
     for fold_i, held_out in enumerate(video_ids):
         test_df  = df[df["video_id"] == held_out].reset_index(drop=True)
-        train_df = df[df["video_id"] != held_out].reset_index(drop=True)
+        train_df = df[(df["video_id"] != held_out) & df["has_scorable"]].reset_index(drop=True)
 
         n_test      = len(test_df)
         active_cls  = present_classes_from_df(test_df)
@@ -411,8 +403,8 @@ def summarize(df_results):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--base",        type=Path,
-                   default=Path("dataset"))
+    p.add_argument("--base",        type=Path, default=Path("."),
+                   help="Dataset root; explicit --img_dir and --mask_dir are recommended")
     p.add_argument("--img_dir",     type=Path, default=None)
     p.add_argument("--mask_dir",    type=Path, default=None)
     p.add_argument("--output_csv",  type=Path, default=None)
@@ -427,10 +419,6 @@ def parse_args():
     p.add_argument("--num_workers", type=int,  default=4)
     p.add_argument("--gpu_id",      type=int,  default=0)
     p.add_argument("--seed",        type=int,  default=42)
-    p.add_argument("--mask_encoding", choices=["release_indexed", "legacy_zero_based"],
-                   default="release_indexed",
-                   help="Use release_indexed for public masks (0 background, 1--4 MES); "
-                        "legacy_zero_based reproduces historical 0--3 masks.")
     p.add_argument("--fold_start",  type=int,  default=1,
                    help="Start from this fold index (1-based, for resuming)")
     p.add_argument("--fold_end",    type=int,  default=999,
@@ -451,7 +439,6 @@ def parse_args():
 
 if __name__ == "__main__":
     args   = parse_args()
-    MASK_ENCODING = args.mask_encoding
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
 
@@ -476,7 +463,7 @@ if __name__ == "__main__":
     for fold_i, held_out in enumerate(video_ids):
         global_fold = fold_start + fold_i + 1
         test_df     = df[df["video_id"] == held_out].reset_index(drop=True)
-        train_df    = df[df["video_id"] != held_out].reset_index(drop=True)
+        train_df    = df[(df["video_id"] != held_out) & df["has_scorable"]].reset_index(drop=True)
 
         n_test     = len(test_df)
         active_cls = present_classes_from_df(test_df)

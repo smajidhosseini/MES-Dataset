@@ -1,0 +1,21 @@
+{
+  "release_size_fixed_in_advance": false,
+  "teacher_protocol": "three-seed leave-one-animal-out ensemble",
+  "teacher_seeds": [42, 1337, 2026],
+  "manual_training_images": 953,
+  "candidate_pool_images": 79841,
+  "target_out_of_fold_precision": 0.8,
+  "class_confidence_thresholds": {"MES0": 0.63, "MES1": 0.99, "MES2": 0.89, "MES3": 0.50},
+  "observed_out_of_fold_precision": {"MES0": 0.8051395789, "MES1": 0.6432789342, "MES2": 0.8007165579, "MES3": 0.8441082992},
+  "released_classes": ["MES0", "MES2", "MES3"],
+  "MES1_policy": "encode_as_ignore_255_because_precision_target_failed",
+  "normalized_entropy_max": 0.4378217553,
+  "ensemble_disagreement_max": 0.0372611827,
+  "manual_temporal_exclusion_radius_frames": 30,
+  "minimum_released_class_area_fraction": 0.015,
+  "exact_duplicate_rule": "globally unique image SHA-256",
+  "manual_visual_overlap_rule": "exclude exact and near visual matches identified by the content audit",
+  "global_diversity_rule": "perceptual-hash Hamming distance >= 4 from every higher-ranked retained image",
+  "ranking_score": "mean_confidence - mean_normalized_entropy - 5*mean_ensemble_disagreement + 0.2*accepted_pixel_ratio",
+  "selected_images": 8772
+}

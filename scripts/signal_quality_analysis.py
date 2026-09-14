@@ -13,9 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-ROOT = None
-IMAGE_DIR = None
-OUT = None
+ROOT = Path(".")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
 
 # Operational challenging-image thresholds, fixed before running this script.
@@ -85,19 +83,17 @@ def summarize(values):
 
 
 def main():
-    global ROOT, IMAGE_DIR, OUT
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--release-root", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, default=None)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, default=ROOT,
+                        help="Root of the extracted Figshare release")
     args = parser.parse_args()
-    ROOT = args.release_root
-    IMAGE_DIR = ROOT / "manual" / "images"
-    OUT = args.output_dir or ROOT / "metadata" / "signal_quality"
-    OUT.mkdir(parents=True, exist_ok=True)
-    paths = sorted(p for p in IMAGE_DIR.iterdir() if p.suffix.lower() in IMAGE_EXTS)
+    image_dir = args.root / "manual" / "images"
+    out_dir = args.root / "analysis" / "signal_quality"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = sorted(p for p in image_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS)
     rows = [measure(path) for path in paths]
     fields = list(rows[0])
-    with (OUT / "signal_quality_per_image.csv").open("w", newline="", encoding="utf-8") as handle:
+    with (out_dir / "signal_quality_per_image.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
@@ -130,12 +126,12 @@ def main():
         "summary": summary,
         "flags": flags,
     }
-    (OUT / "signal_quality_summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    (out_dir / "signal_quality_summary.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
 
     by_video = defaultdict(list)
     for row in rows:
         by_video[row["video_id"]].append(row)
-    with (OUT / "signal_quality_per_video.csv").open("w", newline="", encoding="utf-8") as handle:
+    with (out_dir / "signal_quality_per_video.csv").open("w", newline="", encoding="utf-8") as handle:
         video_fields = ["video_id", "n"] + [f"{m}_mean" for m in metrics] + ["challenging_count", "challenging_percent"]
         writer = csv.DictWriter(handle, fieldnames=video_fields)
         writer.writeheader()
@@ -165,10 +161,10 @@ def main():
         ax.spines[["top", "right"]].set_visible(False)
     axes[0].legend(frameon=False)
     axes[-1].axis("off")
-    fig.suptitle("Signal-quality distributions across 1,228 manually annotated frames", fontsize=14)
+    fig.suptitle(f"Signal-quality distributions across {len(rows):,} manually annotated frames", fontsize=14)
     fig.tight_layout()
-    fig.savefig(OUT / "signal_quality_distributions.png", dpi=300, bbox_inches="tight")
-    fig.savefig(OUT / "signal_quality_distributions.pdf", bbox_inches="tight")
+    fig.savefig(out_dir / "signal_quality_distributions.png", dpi=300, bbox_inches="tight")
+    fig.savefig(out_dir / "signal_quality_distributions.pdf", bbox_inches="tight")
     plt.close(fig)
     print(json.dumps(result, indent=2))
 
